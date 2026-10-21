@@ -1,0 +1,19 @@
+.venv/
+ui/node_modules/
+ui/dist/
+data/
+__pycache__/
+.pytest_cache/
+*.zip
+
+# Local credentials, runtime state and generated deployment archives
+.env
+.env.*
+!.env.example
+secret.key
+*.sqlite3
+*.sqlite3-*
+*.log
+*.tar
+*.tar.gz
+.DS_Store

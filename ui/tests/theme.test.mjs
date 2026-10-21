@@ -1,0 +1,8 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {THEME_KEY,readThemePreference,saveThemePreference,resolveTheme,bindTheme} from '../src/theme.js';
+test('new or invalid preference defaults to system match',()=>{for(const value of [null,'','light','invalid','system'])assert.equal(readThemePreference({getItem:()=>value}),'system')});
+test('system match follows either OS palette and explicit dark stays dark',()=>{assert.equal(resolveTheme('system',false),'light');assert.equal(resolveTheme('system',true),'dark');assert.equal(resolveTheme('dark',false),'dark')});
+test('dark choice survives storage round trip',()=>{const data=new Map(),storage={getItem:k=>data.get(k),setItem:(k,v)=>data.set(k,v)};saveThemePreference('dark',storage);assert.equal(data.get(THEME_KEY),'dark');assert.equal(readThemePreference(storage),'dark')});
+test('storage restrictions do not break startup or selection',()=>{const storage={getItem(){throw Error()},setItem(){throw Error()}};assert.equal(readThemePreference(storage),'system');assert.doesNotThrow(()=>saveThemePreference('dark',storage))});
+test('OS changes apply immediately and subscriptions clean up',()=>{const root={dataset:{}},listeners=new Set(),media={matches:false,addEventListener:(_,fn)=>listeners.add(fn),removeEventListener:(_,fn)=>listeners.delete(fn)};const stop=bindTheme('system',root,media);assert.equal(root.dataset.theme,'light');media.matches=true;for(const fn of listeners)fn();assert.equal(root.dataset.theme,'dark');stop();assert.equal(listeners.size,0);media.matches=false;bindTheme('dark',root,media);assert.equal(root.dataset.theme,'dark')});

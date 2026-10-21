@@ -1,0 +1,35 @@
+# Optional continuous source-only TTL workload. Use together with compose.yaml.
+services:
+  ttl-generator:
+    image: riotx-workbench:1.0.0
+    command: ["python", "/app/ttl-load-generator.py"]
+    environment:
+      REDIS_URL: redis://source:6379/0
+      LOAD_KEYS: "10000"
+      LOAD_BURST_SECONDS: "5"
+      LOAD_PAUSE_SECONDS: "60"
+      LOAD_TTL_SECONDS: "60"
+      LOAD_BATCH_SIZE: "100"
+      LOAD_PREFIX: workbench:ttl-load
+      LOAD_STATUS_FILE: /data/ttl-load-status.json
+    volumes:
+      - ./scripts/ttl-load-generator.py:/app/ttl-load-generator.py:ro
+      - ttl-generator-state:/data
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 10s
+    cpus: "0.5"
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,time; s=json.load(open('/data/ttl-load-status.json')); assert time.time()-s['heartbeat_epoch']<15 and s['phase'] in ('GENERATING','RESTING')"]
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+volumes:
+  ttl-generator-state:

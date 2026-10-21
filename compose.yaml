@@ -1,0 +1,53 @@
+name: riotx-workbench
+services:
+  workbench:
+    build: .
+    image: riotx-workbench:1.0.0
+    ports:
+      - "${WORKBENCH_BIND:-127.0.0.1}:${WORKBENCH_PORT:-8088}:8088"
+    volumes:
+      - workbench-data:/data
+    environment:
+      DEMO_ENABLED: "true"
+      DEMO_SOURCE: redis://source:6379/0
+      DEMO_TARGET: redis://target:6379/0
+      WORKBENCH_TOKEN: "${WORKBENCH_TOKEN:-}"
+      MAX_CONCURRENT_RUNS: "3"
+    restart: unless-stopped
+    depends_on:
+      source:
+        condition: service_healthy
+      target:
+        condition: service_healthy
+    stop_grace_period: 20s
+    init: true
+  source:
+    image: redis:8.2-alpine
+    ports:
+      - "127.0.0.1:6401:6379"
+    command: ["redis-server", "--notify-keyspace-events", "KEA", "--appendonly", "yes"]
+    volumes:
+      - demo-source:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+    restart: unless-stopped
+  target:
+    image: redis:8.2-alpine
+    ports:
+      - "127.0.0.1:6402:6379"
+    command: ["redis-server", "--notify-keyspace-events", "KEA", "--appendonly", "yes"]
+    volumes:
+      - demo-target:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+    restart: unless-stopped
+volumes:
+  workbench-data:
+  demo-source:
+  demo-target:
