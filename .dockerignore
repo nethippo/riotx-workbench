@@ -6,3 +6,16 @@ __pycache__
 data
 tests
 *.zip
+.git
+infra
+deploy
+docs
+**/.env
+**/.env.*
+**/.terraform
+*.tfstate*
+*.tfplan
+*.tfvars
+*.auto.tfvars.json
+backup
+*.tgz

@@ -1,0 +1,10 @@
+output "region" { value = var.region }
+output "cluster_name" { value = aws_ecs_cluster.app.name }
+output "service_name" { value = aws_ecs_service.app.name }
+output "alb_dns_name" { value = aws_lb.app.dns_name }
+output "alb_zone_id" { value = aws_lb.app.zone_id }
+output "instance_id" { value = aws_instance.node.id }
+output "data_volume_id" { value = aws_ebs_volume.data.id }
+output "node_security_group_id" { value = aws_security_group.node.id }
+output "log_group" { value = aws_cloudwatch_log_group.app.name }
+output "deployed_image" { value = var.container_image }

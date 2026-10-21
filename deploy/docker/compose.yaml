@@ -1,0 +1,25 @@
+name: riotx-workbench-prod
+services:
+  workbench:
+    image: ${RIOTX_IMAGE:-riotx-workbench:prod}
+    build:
+      context: ../..
+    ports:
+      - "${WORKBENCH_BIND:-127.0.0.1}:${WORKBENCH_PORT:-8088}:8088"
+    environment:
+      DATA_DIR: /data
+      DEMO_ENABLED: "false"
+      WORKBENCH_TOKEN: ${WORKBENCH_TOKEN:?Run scripts/deploy/docker.sh init first}
+      MAX_CONCURRENT_RUNS: ${MAX_CONCURRENT_RUNS:-1}
+    volumes:
+      - app-data:/data
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+volumes:
+  app-data:

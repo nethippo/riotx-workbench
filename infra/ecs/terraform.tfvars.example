@@ -1,0 +1,22 @@
+region = "ap-northeast-2"
+name   = "riotx-workbench"
+# Existing VPC: node subnet needs NAT or equivalent outbound access.
+vpc_id             = "vpc-REPLACE"
+alb_subnet_ids     = ["subnet-ALB-A", "subnet-ALB-C"]
+instance_subnet_id = "subnet-PRIVATE-A"
+# Internal ALB: use VPN/Direct Connect. For an internet-facing ALB set false,
+# provide PUBLIC ALB subnets, and restrict allowed_client_cidrs to your client IP.
+alb_internal         = true
+allowed_client_cidrs = ["10.0.0.0/16"]
+certificate_arn      = "arn:aws:acm:ap-northeast-2:123456789012:certificate/REPLACE"
+# Plain-text token value is created outside Terraform; put only its ARN here.
+token_secret_arn = "arn:aws:secretsmanager:ap-northeast-2:123456789012:secret:riotx/workbench/token-REPLACE"
+# For a customer-managed KMS key, also set secret_kms_key_arn.
+instance_type = "t3.large"
+# `scripts/deploy/ecs.sh image` generates image.auto.tfvars.json with an immutable
+# container_image digest and matching architecture. Or specify both manually.
+# container_image = "123456789012.dkr.ecr.ap-northeast-2.amazonaws.com/riotx-workbench@sha256:..."
+# architecture    = "X86_64"
+# For linux/arm64 images use a Graviton instance, e.g. t4g.large.
+# redis_security_group_ids = ["sg-REDIS"]
+# redis_port = 6379

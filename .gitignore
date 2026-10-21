@@ -17,3 +17,14 @@ secret.key
 *.tar
 *.tar.gz
 .DS_Store
+
+# Terraform local state, provider cache, plans and environment values
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+*.auto.tfvars.json
+crash.log
+backup/
+*.tgz
