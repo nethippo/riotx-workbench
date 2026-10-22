@@ -3,6 +3,7 @@ WORKDIR /ui
 COPY ui/package*.json ./
 RUN npm ci --no-audit --no-fund
 COPY ui/ ./
+COPY backend/translations.json /backend/translations.json
 RUN npm run build
 
 FROM python:3.12-slim-bookworm AS riotx

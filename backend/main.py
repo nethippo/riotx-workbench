@@ -23,6 +23,9 @@ from cryptography.fernet import Fernet
 from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import request_validation_exception_handler
+from .localization import language, translate
 from prometheus_client.parser import text_string_to_metric_families
 from pydantic import BaseModel, Field, field_validator
 
@@ -130,8 +133,8 @@ def redact(text):
     return re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", text)[:4000]
 
 
-def add_log(run, message, level="INFO"):
-    row = {"time": now(), "level": level, "message": redact(message)}
+def add_log(run, message, level="INFO", origin="workbench"):
+    row = {"time": now(), "level": level, "message": redact(message), "origin": origin}
     db.execute("INSERT INTO logs(run,body) VALUES (?,?)", (run, json.dumps(row, ensure_ascii=False)))
     seq = db.execute("SELECT last_insert_rowid()").fetchone()[0]
     row["seq"] = seq
@@ -563,7 +566,7 @@ async def execute_run(run):
                     break
                 msg = line.decode(errors="replace").strip()
                 if msg:
-                    add_log(ident, msg, "ERROR" if "ERROR" in msg else "WARN" if "WARN" in msg else "INFO")
+                    add_log(ident, msg, "ERROR" if "ERROR" in msg else "WARN" if "WARN" in msg else "INFO", origin="riotx")
             code = await proc.wait()
             run = get("run", ident)
             cancelled = run["status"] == "CANCELLING"
@@ -669,6 +672,25 @@ async def lifespan(app):
 app = FastAPI(title="RIOTX Workbench", lifespan=lifespan)
 
 
+@app.exception_handler(HTTPException)
+async def localized_http_error(request, exc):
+    return JSONResponse({"detail": translate(exc.detail, language(request.headers.get("accept-language")))},
+                        status_code=exc.status_code, headers=exc.headers)
+
+
+@app.exception_handler(RequestValidationError)
+async def localized_validation_error(request, exc):
+    response = await request_validation_exception_handler(request, exc)
+    body = json.loads(response.body)
+    lang = language(request.headers.get("accept-language"))
+    # Keep validation inputs and field paths unchanged; only translate owned messages.
+    for error in body.get("detail", []):
+        error["msg"] = translate(error["msg"], lang)
+        if isinstance(error.get("ctx", {}).get("error"), str):
+            error["ctx"]["error"] = translate(error["ctx"]["error"], lang)
+    return JSONResponse(body, status_code=response.status_code)
+
+
 @app.middleware("http")
 async def protection(request, call_next):
     if request.url.path.startswith("/api"):
@@ -676,11 +698,11 @@ async def protection(request, call_next):
         if token and request.url.path != "/api/health":
             supplied = request.headers.get("authorization", "").removeprefix("Bearer ")
             if not secrets.compare_digest(supplied, token):
-                return JSONResponse({"detail": "접근 토큰이 필요합니다"}, status_code=401)
+                return JSONResponse({"detail": translate("접근 토큰이 필요합니다", language(request.headers.get("accept-language")))}, status_code=401)
         if request.method not in {"GET", "HEAD", "OPTIONS"}:
             origin = request.headers.get("origin")
             if origin and urlparse(origin).netloc != request.headers.get("host"):
-                return JSONResponse({"detail": "교차 사이트 변경 요청 거부"}, status_code=403)
+                return JSONResponse({"detail": translate("교차 사이트 변경 요청 거부", language(request.headers.get("accept-language")))}, status_code=403)
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
