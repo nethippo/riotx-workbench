@@ -387,8 +387,15 @@ async def poll():
     while True:
         profiles = [secret_profile(p["id"]) for p in objects("profile")]
         await asyncio.gather(*(probe(p) for p in profiles), return_exceptions=True)
+        current_profiles = {p["id"] for p in objects("profile")}
         for p in profiles:
             ident = p["id"]
+            if ident not in current_profiles:
+                telemetry.pop(ident, None)
+                series.pop(ident, None)
+                continue
+            # A profile may have been edited while probing Redis.
+            p = secret_profile(ident)
             if p["observe"] and (ident not in subscriber_tasks or subscriber_tasks[ident].done()):
                 subscriber_tasks[ident] = asyncio.create_task(observe(p))
             elif not p["observe"]:
@@ -730,6 +737,37 @@ async def update_profile(ident: str, body: Profile):
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
     return save_profile(p)
+
+
+@app.delete("/api/profiles/{ident}")
+async def delete_profile(ident: str):
+    get("profile", ident)
+    # Check execution snapshots, including queued runs and jobs edited since launch.
+    if any(r["status"] in ACTIVE and ident in
+           (r["snapshot"].get("source_id"), r["snapshot"].get("target_id"))
+           for r in objects("run")):
+        raise HTTPException(409, "이 연결을 사용하는 실행이 진행 중이거나 대기 중입니다. 실행을 종료한 뒤 삭제하세요")
+    changed = []
+    # No await before commit: a concurrent submission cannot retain this profile.
+    with db:
+        for job in objects("job", include_deleted=True):
+            fields = [key for key in ("source_id", "target_id") if job.get(key) == ident]
+            if not fields:
+                continue
+            job.update({key: "" for key in fields})
+            job["revision"] = job.get("revision", 0) + 1
+            db.execute("UPDATE objects SET body=? WHERE kind='job' AND id=?",
+                       (json.dumps(job, ensure_ascii=False), job["id"]))
+            changed.append(job["id"])
+        db.execute("DELETE FROM objects WHERE kind='profile' AND id=?", (ident,))
+    task = subscriber_tasks.pop(ident, None)
+    if task:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    telemetry.pop(ident, None)
+    series.pop(ident, None)
+    event_totals.pop(ident, None)
+    return {"deleted_id": ident, "updated_jobs": changed}
 
 
 @app.post("/api/profiles/{ident}/probe")

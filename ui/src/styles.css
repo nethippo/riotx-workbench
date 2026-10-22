@@ -545,3 +545,5 @@ select{color-scheme:inherit}.primary,.primary svg{color:var(--primary-text)}.tog
 .history-list button{border-radius:3px}.history-list button.chosen{background:var(--selected);box-shadow:inset 2px 0 var(--accent)}
 @media(max-width:620px){.sidebar{position:relative;top:auto;height:auto;padding-bottom:12px}.sidebar>nav{flex:none}.sidebar>.side-footer,.sidebar>.new-job{display:none}.history.history-drawer{position:fixed;bottom:0;z-index:25}.history-list{max-height:min(42dvh,340px)}.history-drawer .history-trigger{height:46px}.app{padding-bottom:46px}}
 @media(prefers-reduced-motion:reduce){.history-body,.history-caret{transition:none}}
+
+.profile-entry{display:flex;align-items:center;gap:2px}.profile-entry>button:first-child{flex:1;min-width:0}.profile-list .profile-entry .entry-menu-trigger{width:30px;flex-shrink:0;padding:8px 4px;justify-content:center}
