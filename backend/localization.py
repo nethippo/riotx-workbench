@@ -15,15 +15,17 @@ def language(header):
 
 
 def translate(value, lang):
-    if not isinstance(value, str) or lang != 'en':
+    if not isinstance(value, str):
         return value
-    if value in CATALOG:
-        return CATALOG[value]
+    table=CATALOG if lang=='en' else {en:ko for ko,en in CATALOG.items()}
+    if value in table:
+        return table[value]
     if value.startswith('Value error, '):
         return 'Value error, ' + translate(value[len('Value error, '):], lang)
     prefix = '지원하지 않거나 관리되는 옵션:'
+    prefix=prefix if lang=='en' else CATALOG[prefix]
     if value.startswith(prefix):
-        return CATALOG[prefix] + value[len(prefix):]
+        return table[prefix] + value[len(prefix):]
     exception = re.fullmatch(r'([A-Za-z][A-Za-z0-9_.]*(?:Error|Exception): ?)(.*)', value)
     if exception:
         return exception[1] + translate(exception[2], lang)

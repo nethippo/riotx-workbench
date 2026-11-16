@@ -34,7 +34,7 @@ test('all Korean UI literals and backend system messages have catalog entries',(
  const catalog=JSON.parse(readFileSync(new URL('../../backend/translations.json',import.meta.url)));
  const app=readFileSync(new URL('../src/App.jsx',import.meta.url),'utf8');
  const source=readFileSync(new URL('../src/source.js',import.meta.url),'utf8');
- for(const match of (app+'\n'+source).matchAll(/\b(?:tr|t)\((['"])([^'"\n]*[가-힣][^'"\n]*)\1\)/g))assert.ok(Object.hasOwn(catalog,match[2].trim()),match[2]);
+ for(const match of (app+'\n'+source+'\n'+readFileSync(new URL('../src/Ingestion.jsx',import.meta.url),'utf8')).matchAll(/\b(?:tr|t)\((['"])([^'"\n]*[가-힣][^'"\n]*)\1\)/g))assert.ok(Object.hasOwn(catalog,match[2].trim()),match[2]);
  for(const [ko,en]of Object.entries(catalog)){assert.ok(en.trim(),ko);assert.doesNotMatch(en,/[가-힣]/,ko)}
  // Locale changes must never translate arbitrary names or raw RIOTX log lines.
  assert.match(app,/l\.origin==='workbench'\?message\(l\.message\):l\.message/);

@@ -1,6 +1,7 @@
 import {t} from './i18n.js';
 const REDIS_SOURCES = new Set(['replicate','compare','stats','file-export','db-export','stream-export']);
 export function sourceContext(job, state) {
+  if(job?.kind==='mongo-import'){const profile=state.profiles.find(p=>p.id===job.source_id),run=[...state.runs].reverse().find(r=>r.job_id===job.id);return {profile,name:profile?.name||t('입력 데이터'),label:t('소스 문서 수'),telemetry:{keys:run?.audit_status?.source_documents,complete:run?.audit_status?.source_documents!=null,updated_at:run?.started_at,scope:t('실행 시작 시 조회 범위 문서 수')}}}
   if (job?.kind === 'file-import') {
     const file = state.files.find(f=>f.id===job.file_id), status=job.source_status||{};
     return {profile:null, name:file?.name||t('입력 파일 미선택'), label:t('소스 입력 레코드 수'),

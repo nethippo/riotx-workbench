@@ -1,11 +1,75 @@
 # RIOTX Workbench
 
-Redis 데이터 이전·실시간 복제·파일 import·결과 비교를 웹에서 실행하고 모니터링하는 한국어 워크벤치입니다. React UI, FastAPI, RIOTX를 하나의 Docker 이미지로 제공합니다.
+Redis 데이터 이전·실시간 복제·파일 import·결과 비교를 웹에서 실행하고 모니터링하는 English·Korean UI를 지원하는 워크벤치입니다. React UI, FastAPI, RIOTX를 하나의 Docker 이미지로 제공합니다.
+
+## UI 주요 화면
+
+아래는 **2026-10-26 로컬 Workbench에서 직접 캡처한 화면**입니다. 현재 테스트 Redis 서버는 삭제되어 소스·타깃 키 수와 알림 상태가 **‘확인 불가’**로 표시됩니다. 결과 비교와 로그는 이전에 저장된 실행 이력이며, 현재 진행 중인 복제나 새 검증 결과를 뜻하지 않습니다.
+
+화면은 브라우저 폭에 반응합니다. 넓은 화면에서는 작업 목록·중앙 작업 화면·우측 서랍으로 구성되며, 아래처럼 좁은 폭에서는 작업 목록이 위로 이동하고 서랍이 작업 화면 위에 열립니다. 이미지를 클릭하면 원본을 볼 수 있습니다.
+
+### 1. 복제 현황과 데이터 흐름
+
+업무 작업공간에서 복제 작업을 선택하면 **소스 → 읽기 → 쓰기 → 타깃** 흐름, 관측 이벤트 그래프와 최근 활동을 확인합니다. LIVE 모드에서는 선택한 소스·타깃 DB의 키 수를 상단에서 계속 조회합니다. 오른쪽 메뉴로 모니터·설정·로그·소개 서랍을 열고 닫습니다.
+
+[![복제 현황: LIVE 소스·타깃 키 수, 데이터 흐름, 관측 그래프와 최근 활동](docs/screenshots/01-replication-overview.jpg)](docs/screenshots/01-replication-overview.jpg)
+
+<details>
+<summary><strong>2. 복제 하위 메뉴의 결과 비교</strong></summary>
+
+**복제 현황 → 결과 비교**에서 상위 복제의 연결·키 범위·비교 방식을 참조합니다. 실행 당시 설정과 RIOTX 실제 출력, 비교 작업의 독립된 실행 이력을 함께 확인할 수 있습니다. **프로세스 정상 종료나 키 수 일치만으로 전체 데이터가 같다고 판단하지 않습니다.**
+
+[![결과 비교: 상위 복제 설정 참조, 비교 범위와 방식, 실제 출력 및 비교 실행 이력](docs/screenshots/02-result-comparison.jpg)](docs/screenshots/02-result-comparison.jpg)
+
+</details>
+
+<details>
+<summary><strong>3. 소스·타깃 알림 탐지와 설정 서랍</strong></summary>
+
+**우측 설정**에서 양쪽 Redis의 `notify-keyspace-events` 상태를 각각 탐지하고 활동 구독 여부를 선택합니다. 구독 옵션과 Redis 서버 설정 변경은 분리되어 있습니다. 서버 플래그는 **서버 설정 변경 허용 → Redis에 적용**을 눌러야 변경됩니다. 서랍을 접으면 중앙 작업 공간을 더 넓게 사용할 수 있습니다.
+
+[![알림 설정: 소스·타깃의 독립된 알림 상태, 활동 구독, 서버 설정 변경 허용](docs/screenshots/03-notification-settings.jpg)](docs/screenshots/03-notification-settings.jpg)
+
+</details>
+
+<details>
+<summary><strong>4. 실행 이력 서랍과 상세 로그</strong></summary>
+
+하단 **실행 이력**을 누르면 서랍이 위로 열립니다. 이력에서 실행을 선택하면 해당 실행의 **우측 로그**를 확인할 수 있으며, 검색과 로그 레벨 필터를 사용할 수 있습니다. Workbench는 실행당 최근 2,000줄을 보관하고 비밀값을 마스킹합니다. RIOTX의 원본 출력은 번역하지 않습니다.
+
+[![실행 이력과 로그: 선택한 비교 실행의 실제 RIOTX 출력, 검색·레벨 필터, 아래쪽 이력 서랍](docs/screenshots/04-run-history-logs.jpg)](docs/screenshots/04-run-history-logs.jpg)
+
+</details>
+
+<details>
+<summary><strong>5. 연결 프로필 관리와 삭제 옵션</strong></summary>
+
+상단 **연결 관리**에서 Redis URL, ACL 사용자·비밀번호, Cluster 여부, 활동 구독과 키 마스킹을 설정합니다. 각 프로필의 **⋮ → 연결 삭제**로 삭제 확인 화면을 엽니다. 사용 중인 실행이 있으면 삭제를 막고, 삭제 가능한 경우 작업의 연결 지정만 해제하며 기존 실행 이력·로그와 Redis 데이터는 보존합니다.
+
+[![연결 관리: 데모 소스·타깃 프로필, 인증 입력, 활동 구독, 키 마스킹 및 연결 삭제 옵션](docs/screenshots/05-connection-management.jpg)](docs/screenshots/05-connection-management.jpg)
+
+</details>
+
+<details>
+<summary><strong>6. 전체 설정의 언어와 테마</strong></summary>
+
+**전체 설정**에서 **English / Korean**과 **System match / Dark**를 선택합니다. 기본값은 Korean과 System match입니다. 선택은 브라우저에 저장되고 화면에 즉시 반영됩니다. 언어를 바꿔도 작업명·연결명·파일명과 입력 중인 설정 값은 유지됩니다.
+
+[![전체 설정: English·Korean 언어 선택과 System match·Dark 테마 선택](docs/screenshots/06-language-theme.jpg)](docs/screenshots/06-language-theme.jpg)
+
+</details>
+
+## Enterprise·MongoDB 확장 화면
+
+2026-11-16 배포 서비스에서 검증한 중복 키 대시보드입니다. 신규 1건·갱신 1건, 고유 중복 1개를 기록했으며 테스트 데이터는 검증 후 삭제했습니다. 상단은 현재 연결된 DB 키 수입니다.
+
+[![Enterprise 연결과 중복 감사 대시보드](docs/screenshots/07-enterprise-audit.png)](docs/screenshots/07-enterprise-audit.png)
 
 ## 문서
 
 | 목적 | 문서 |
 | --- | --- |
+| MongoDB 일괄 가져오기·Enterprise·중복 감사 | [가져오기 가이드](docs/INGESTION_KO.md) |
 | 처음 사용하기, 작업·파일·로그·테마 | [사용 가이드](docs/USER_GUIDE_KO.md) |
 | 로컬 데모·운영 Docker 배포 | [Docker 배포 가이드](docs/DEPLOY_DOCKER_KO.md) |
 | ECR·Terraform·AWS ECS 서비스 배포 | [AWS ECS 배포 가이드](docs/DEPLOY_ECS_KO.md) |
@@ -22,7 +86,7 @@ cd riotx-workbench
 docker compose up -d --build
 ```
 
-브라우저에서 <http://127.0.0.1:8088>에 접속합니다. 비공개 저장소이므로 clone에는 해당 계정의 GitHub 권한이 필요합니다.
+브라우저에서 <http://127.0.0.1:8088>에 접속합니다.
 
 | 서비스 | 로컬 접속 주소 |
 | --- | --- |
@@ -68,12 +132,15 @@ cp infra/ecs/terraform.tfvars.example infra/ecs/terraform.tfvars
 
 - 업무 작업공간별 여러 잡 저장·설정 수정본·독립된 실행 이력
 - Redis SCAN/LIVE 복제와 하위 메뉴의 QUICK/FULL 결과 비교
+- MongoDB 커서·분할 청크·체크포인트 재개를 통한 일괄 가져오기
+- Enterprise Proxy/Bloom 기본값, 정확한 기존 키 보호와 중복 키 대시보드·이벤트 로그
 - 파일 기반 작업의 입력 레코드 집계, 메타데이터 감시, 교체 시 자동 재실행
 - 선택한 Redis 소스·타깃 DB의 키 수를 2초마다 조회
 - 양쪽 keyspace notifications 자동 탐지, 활동 구독과 서버 설정 변경의 분리
 - 우측 모니터·설정·로그·소개 서랍과 좌측 하단 실행 이력 서랍
 - 작업·작업공간의 복구 가능한 삭제와 로그 보존
-- 전체 설정의 System match 기본 테마와 Dark 선택
+- 전체 설정의 English/Korean 언어 선택과 System match 기본 테마·Dark 선택
+- 연결 프로필별 삭제 옵션, 사용 중인 실행 보호와 기존 이력 보존
 - 공식 RIOTX 배포 저장소를 통한 안정 버전 업데이트 안내
 
 ## 구조와 의존성

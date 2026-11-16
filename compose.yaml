@@ -9,8 +9,8 @@ services:
       - workbench-data:/data
     environment:
       DEMO_ENABLED: "true"
-      DEMO_SOURCE: redis://source:6379/0
-      DEMO_TARGET: redis://target:6379/0
+      DEMO_SOURCE: "${DEMO_SOURCE:-redis://source:6379/0}"
+      DEMO_TARGET: "${DEMO_TARGET:-redis://target:6379/0}"
       WORKBENCH_TOKEN: "${WORKBENCH_TOKEN:-}"
       MAX_CONCURRENT_RUNS: "3"
     restart: unless-stopped

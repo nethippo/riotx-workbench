@@ -25,13 +25,17 @@ from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.exceptions import RequestValidationError
 from fastapi.exception_handlers import request_validation_exception_handler
-from .localization import language, translate
+from .localization import language, translate, CATALOG
 from prometheus_client.parser import text_string_to_metric_families
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+from typing import Literal
 
 from .inheritance import comparison_parent, effective_job
 from .deletion import deletion_targets, active_deletion_runs
 from .source_files import metadata, fingerprint, parser_key, inspect_file
+from .audit import Audit, SCHEMA as AUDIT_SCHEMA
+from .ingest import replicate as managed_replicate, client as binary_client
+from .mongo_source import import_mongo, mongo_client, validate_filter
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = Path(os.getenv("DATA_DIR", str(ROOT / "data")))
@@ -78,6 +82,7 @@ def setup_store():
       CREATE TABLE IF NOT EXISTS logs (seq INTEGER PRIMARY KEY AUTOINCREMENT,run TEXT,body TEXT);
       CREATE INDEX IF NOT EXISTS logs_run ON logs(run,seq);
     """)
+    db.executescript(AUDIT_SCHEMA)
     db.commit()
 
 
@@ -110,6 +115,10 @@ def secret_profile(ident):
 
 def public_profile(ident):
     p = secret_profile(ident)
+    p.setdefault('product','redis')
+    p.setdefault('connection_mode','cluster' if p.get('cluster') else 'proxy')
+    p.setdefault('bloom_enabled',p['product']=='enterprise')
+    p.setdefault('deployment','standard')
     return {k: v for k, v in p.items() if k not in {"password"}} | {"has_password": bool(p.get("password"))}
 
 
@@ -125,7 +134,7 @@ def safe_error(exc):
 
 
 def redact(text):
-    text = re.sub(r"(rediss?://)[^\s/@]+:[^\s/@]*@", r"\1***@", text)
+    text = re.sub(r"((?:rediss?|mongodb(?:\+srv)?)://)[^\s/@]+:[^\s/@]*@", r"\1***@", text)
     for item in objects("profile"):
         p = secret_profile(item["id"])
         if p.get("password"):
@@ -151,16 +160,40 @@ class Profile(BaseModel):
     cluster: bool = False
     observe: bool = True
     mask_keys: bool = True
+    product: Literal['redis','enterprise','mongodb'] = 'redis'
+    connection_mode: Literal['legacy','proxy','cluster'] = 'legacy'
+    bloom_enabled: bool | None = None
+    deployment: Literal['standard','active-active'] = 'standard'
 
-    @field_validator("url")
+    @field_validator('url')
     @classmethod
-    def valid_url(cls, value):
-        p = urlparse(value)
-        if p.scheme not in {"redis", "rediss"} or not p.hostname or p.username or p.password or p.query or p.fragment:
-            raise ValueError("redis(s)://host:port/db 형식을 사용하고 인증 정보는 별도 입력하세요")
-        if p.path and not re.fullmatch(r"/\d+", p.path):
-            raise ValueError("DB 번호는 정수여야 합니다")
+    def valid_url_syntax(cls,value):
+        p=urlparse(value)
+        if p.scheme in {'redis','rediss'}:
+            if p.path and not re.fullmatch(r'/\d+',p.path):raise ValueError('DB 번호는 정수여야 합니다')
         return value
+
+    @model_validator(mode='after')
+    def valid_connection(self):
+        p=urlparse(self.url)
+        allowed={'mongodb','mongodb+srv'} if self.product=='mongodb' else {'redis','rediss'}
+        if p.scheme not in allowed or not p.hostname or p.username or p.password or p.fragment:
+            raise ValueError('Use a supported database URL and enter credentials separately')
+        if self.product=='mongodb':
+            from urllib.parse import parse_qs
+            params=parse_qs(p.query)
+            for key,values in params.items():
+                if re.search('pass|secret|token',key,re.I) or key.lower() in {'tlsinsecure','tlsallowinvalidcertificates','tlsallowinvalidhostnames'} and any(v.lower()=='true' for v in values):
+                    raise ValueError('Unsafe MongoDB URL option')
+            self.cluster=False;self.observe=False;self.bloom_enabled=False
+        else:
+            if p.query:raise ValueError('Redis URL query parameters are not supported')
+            if p.path and not re.fullmatch(r'/\d+',p.path):raise ValueError('DB 번호는 정수여야 합니다')
+            if self.connection_mode=='cluster':self.cluster=True
+            elif self.connection_mode=='proxy' or self.product=='enterprise':self.cluster=False
+            if self.product=='enterprise' and self.bloom_enabled is None:self.bloom_enabled=True
+            if self.deployment=='active-active':self.bloom_enabled=False
+        return self
 
 
 class Job(BaseModel):
@@ -176,6 +209,8 @@ class Job(BaseModel):
     key_template: str = ""
     file_id: str = ""
     watch_file: bool = True
+    duplicate_policy: Literal['off','skip','observe'] = 'off'
+    ingest: dict = Field(default_factory=dict)
 
 
 def resolve_job(job):
@@ -229,6 +264,15 @@ def notification_status(flags):
 
 async def probe(p):
     ident = p["id"]
+    if p.get('product')=='mongodb':
+        c=mongo_client(p)
+        try:
+            await c.admin.command('ping')
+            telemetry[ident]={'id':ident,'complete':True,'sampled_at':now(),'updated_at':now(),'subscriber':'off','keys':None,'notifications':'not-applicable','scope':'MongoDB collection count is reported by the import job'}
+        except Exception as exc:
+            telemetry[ident]={'id':ident,'complete':False,'error':safe_error(exc),'keys':None,'notifications':'not-applicable'}
+        finally:await c.close()
+        return
     nodes = []
     try:
         for name, c in await node_clients(p):
@@ -399,6 +443,7 @@ async def poll():
                 continue
             # A profile may have been edited while probing Redis.
             p = secret_profile(ident)
+            if p.get('product')=='mongodb':continue
             if p["observe"] and (ident not in subscriber_tasks or subscriber_tasks[ident].done()):
                 subscriber_tasks[ident] = asyncio.create_task(observe(p))
             elif not p["observe"]:
@@ -410,6 +455,7 @@ async def poll():
 
 
 async def discover():
+    capabilities['mongo-import']={'available':True,'options':[],'help':'Managed MongoDB cursor, bounded JSONL chunks, atomic writes and resumable checkpoints.'}
     for kind in KINDS:
         p = await asyncio.create_subprocess_exec("riotx", kind, "--help", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
         output, _ = await p.communicate()
@@ -424,6 +470,9 @@ CONNECTION_OPTIONS = re.compile(r"^(source-|target-)?(pass|user|host|port|uri|so
 
 def build_command(job, run_id):
     kind = job["kind"]
+    if is_managed(job):
+        validate_managed(job)
+        return ['workbench-managed',kind],os.environ.copy()
     cap = capabilities.get(kind, {})
     if kind not in KINDS or not cap.get("available"):
         raise HTTPException(422, "포함 RIOTX에서 지원하지 않는 명령입니다")
@@ -452,6 +501,7 @@ def build_command(job, run_id):
         raise HTTPException(422, "Memcached는 별도 인증·연결 어댑터가 필요합니다. 현재 UI 실행은 지원하지 않습니다")
     else:
         ident = job["target_id"] if kind in {"file-import", "db-import", "stream-import", "gen", "faker", "elastic-import", "snowflake-import", "redis-import"} else job["source_id"]
+        if secret_profile(ident).get('product')=='mongodb':raise HTTPException(422,'MongoDB profiles require MongoDB import jobs')
         connection(ident)
     options = job.get("options", {})
     for name, value in options.items():
@@ -499,6 +549,11 @@ async def preflight(job):
     if job.get("comparison_disabled"):
         raise HTTPException(422, "상위 복제 설정에서 비교가 비활성화되어 있습니다. 비교 방식을 QUICK 또는 FULL로 변경하세요")
     build_command(job, "validate")
+    if is_managed(job):
+        source=secret_profile(job['source_id']);target=secret_profile(job['target_id'])
+        await probe(source);await probe(target)
+        if not telemetry[source['id']].get('complete') or not telemetry[target['id']].get('complete'):
+            raise HTTPException(409,'Source or target connection is unavailable')
     def endpoint(ident):
         if not ident:
             return None
@@ -548,6 +603,9 @@ async def execute_run(run):
                 return
             run.update(status="STARTING", started_at=now())
             put("run", run)
+            if is_managed(run['snapshot']):
+                await execute_managed(run)
+                return
             args, env = build_command(run["snapshot"], ident)
             port = next(n for n in range(9200, 9300) if n not in reserved_ports)
             reserved_ports.add(port)
@@ -655,6 +713,7 @@ async def lifespan(app):
     for r in objects("run"):
         if r["status"] in ACTIVE:
             put("run", r | {"status": "UNKNOWN", "ended_at": now()})
+            if r.get("engine")=="workbench-managed":audit_for(r["id"]).recover_pending()
     seed()
     bind_comparisons()
     discovery = asyncio.create_task(discover())
@@ -710,9 +769,146 @@ async def protection(request, call_next):
     return response
 
 
+class IngestDefaults(BaseModel):
+    bloom_enabled: bool = True
+    bloom_capacity: int = Field(default=1000000,ge=100,le=100000000)
+    bloom_error_rate: float = Field(default=0.001,ge=0.000001,le=0.1)
+    chunk_mib: int = Field(default=32,ge=1,le=64)
+    max_document_mib: int = Field(default=64,ge=1,le=64)
+    retention_days: int = Field(default=7,ge=1,le=90)
+    record_key_names: bool = False
+
+
+def ingest_defaults():
+    stored=objects('ingest-defaults')
+    return IngestDefaults(**(stored[0] if stored else {}))
+
+
+def ingest_settings(job):
+    settings=ingest_defaults().model_dump()
+    settings['record_key_names']=bool(settings['record_key_names'] and not secret_profile(job['target_id']).get('mask_keys',True))
+    settings['scope']=job['ingest'].get('key_prefix') or job['options'].get('key-pattern','*')
+    return settings
+
+
+def is_managed(job):
+    return job.get('kind')=='mongo-import' or job.get('kind')=='replicate' and job.get('duplicate_policy','off')!='off'
+
+
+def validate_managed(job):
+    source=secret_profile(job.get('source_id',''));target=secret_profile(job.get('target_id',''))
+    if target.get('product')=='mongodb':raise HTTPException(422,'The target must be Redis')
+    if target.get('deployment')=='active-active':raise HTTPException(422,'Managed writes do not support Active-Active targets')
+    if source['id']==target['id'] or source['url']==target['url']:raise HTTPException(422,'Source and target must be different')
+    if job['kind']=='mongo-import':
+        if source.get('product')!='mongodb':raise HTTPException(422,'Choose a MongoDB source profile')
+        opts=job.get('ingest',{})
+        if not opts.get('database') or not opts.get('collection'):raise HTTPException(422,'MongoDB database and collection are required')
+        if opts.get('filter_invalid'):raise HTTPException(422,'Invalid MongoDB filter JSON')
+        if not isinstance(opts.get('filter',{}),dict):raise HTTPException(422,'MongoDB filter must be an object')
+        try:validate_filter(opts.get('filter',{}))
+        except ValueError as exc:raise HTTPException(422,str(exc))
+        if opts.get('storage','json') not in {'json','string'}:raise HTTPException(422,'Choose JSON or String storage')
+        if opts.get('bson_mode','canonical') not in {'canonical','relaxed'}:raise HTTPException(422,'Choose canonical or relaxed BSON conversion')
+        fields=opts.get('fields',[])
+        if not isinstance(fields,list) or any(not isinstance(f,str) or not f or f.startswith('$') for f in fields):raise HTTPException(422,'Projection fields must be a list of field names')
+        ttl=opts.get('ttl_seconds',0)
+        if not isinstance(ttl,int) or isinstance(ttl,bool) or not 0<=ttl<=315360000:raise HTTPException(422,'Invalid document TTL')
+        prefix=opts.get('key_prefix','')
+        if not isinstance(prefix,str) or len(prefix)>200 or prefix.startswith('wb:dedup:'):raise HTTPException(422,'Invalid key prefix')
+        if job.get('options') or job.get('arguments'):raise HTTPException(422,'MongoDB settings belong in the MongoDB form')
+    else:
+        if source.get('product')=='mongodb':raise HTTPException(422,'Redis replication requires a Redis source')
+        opts=job.get('options',{});mode=str(opts.get('mode','SCAN')).upper()
+        if mode not in {'SCAN','LIVE','LIVEONLY'}:raise HTTPException(422,'Invalid managed replication mode')
+        if mode!='SCAN' and job.get('duplicate_policy')=='skip':raise HTTPException(422,'LIVE replication must update existing keys; use observe policy')
+        supported={'mode','key-pattern','key-type','scan-count','no-ttl','compare','ttl-tolerance','batch','threads','struct'}
+        if set(opts)-supported or opts.get('struct') or job.get('arguments'):
+            raise HTTPException(422,'Managed replication uses bounded DUMP/RESTORE; disable struct and unsupported native options')
+        if not isinstance(opts.get('key-pattern','*'),str):raise HTTPException(422,'Key pattern must be a string')
+        if not isinstance(opts.get('scan-count',200),int) or not 1<=opts.get('scan-count',200)<=10000:raise HTTPException(422,'Invalid scan count')
+
+
+def audit_for(ident):
+    r=get('run',ident)
+    settings=r['snapshot'].get('_ingest_settings',{})
+    audit=Audit(db,cipher,ident,record_names=settings.get('record_key_names',False),retention_days=settings.get('retention_days',7))
+    audit.prune()
+    return audit
+
+
+async def execute_managed(run):
+    ident=run['id'];job=run['snapshot'];settings=job['_ingest_settings']
+    run.update(status='RUNNING',engine='workbench-managed',audit_status={'phase':'starting'})
+    put('run',run)
+    audit=audit_for(ident);audit.prune();audit.recover_pending()
+    def status(**fields):
+        r=get('run',ident);r['audit_status']=r.get('audit_status',{})|fields;put('run',r)
+    add_log(ident,'Managed worker started; duplicate decisions are recorded separately')
+    try:
+        if job['kind']=='mongo-import':
+            await import_mongo(secret_profile(job['source_id']),secret_profile(job['target_id']),job,settings,audit,status,DATA/'ingest'/ident)
+        else:
+            await managed_replicate(secret_profile(job['source_id']),secret_profile(job['target_id']),job,settings,audit,status)
+        r=get('run',ident)
+        put('run',r|{'status':'SUCCEEDED','exit_code':0,'ended_at':now(),'validation':'NOT_RUN'})
+        add_log(ident,'Managed worker completed; inspect audit events and comparison results')
+    except BaseException as exc:
+        cause=exc
+        while isinstance(cause,BaseExceptionGroup) and cause.exceptions:cause=cause.exceptions[0]
+        if isinstance(cause,(ValueError,OSError)) and str(cause) in CATALOG.values():
+            add_log(ident,str(cause),'ERROR')
+        audit.recover_pending()
+        status(phase='interrupted')
+        raise
+
+
+@app.get('/api/ingest/defaults')
+async def get_ingest_defaults():
+    return ingest_defaults().model_dump()
+
+
+@app.put('/api/ingest/defaults')
+async def save_ingest_defaults(body: IngestDefaults):
+    return put('ingest-defaults',body.model_dump()|{'id':'global'})
+
+
+@app.get('/api/runs/{ident}/audit/summary')
+async def audit_summary(ident: str):
+    r=get('run',ident)
+    return audit_for(ident).summary()|{'status':r.get('audit_status',{}),'retention_days':r['snapshot'].get('_ingest_settings',{}).get('retention_days',7)}
+
+
+@app.get('/api/runs/{ident}/audit/keys')
+async def audit_keys(ident: str,after: int=0,limit: int=50):
+    return audit_for(ident).keys(max(0,after),max(1,min(limit,100)))
+
+
+@app.get('/api/runs/{ident}/audit/events')
+async def audit_events(ident: str,after: int=0,limit: int=100,event_id: str|None=None,outcome: str|None=None,latest: bool=False):
+    return audit_for(ident).events(max(0,after),max(1,min(limit,200)),event_id,outcome,latest)
+
+
+@app.post('/api/runs/{ident}/resume')
+async def resume_ingest(ident: str):
+    r=get('run',ident)
+    if r['status'] in ACTIVE or r['snapshot']['kind']!='mongo-import':raise HTTPException(409,'Only an interrupted MongoDB batch can be resumed')
+    if r['status']=='SUCCEEDED':raise HTTPException(409,'This import already completed')
+    j=resolve_job(get('job',r['job_id']))
+    saved={k:v for k,v in r['snapshot'].items() if k!='_ingest_settings'}
+    if j!=saved:raise HTTPException(409,'Job settings changed; create a new run')
+    await preflight(j)
+    if resolve_job(get('job',r['job_id']))!=j:raise HTTPException(409,'Job settings changed during validation')
+    r=get('run',ident)
+    if r['status'] in ACTIVE:raise HTTPException(409,'This run is already active')
+    r.update(status='QUEUED',ended_at=None,exit_code=None,resumed_at=now())
+    put('run',r);run_tasks[ident]=asyncio.create_task(execute_run(r))
+    return r
+
+
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "riotx": RUNTIME["version"], "capabilities_ready": len(capabilities) == len(KINDS)}
+    return {"status": "ok", "riotx": RUNTIME["version"], "capabilities_ready": all(k in capabilities for k in KINDS)}
 
 
 @app.get("/api/state")
@@ -720,7 +916,7 @@ async def state():
     return {"jobs": [resolve_job(j) | {"source_status": file_status(j)} for j in objects("job")], "runs": objects("run")[-200:], "profiles": [public_profile(p["id"]) for p in objects("profile")],
         "telemetry": telemetry, "activity": list(activity)[:150], "series": dict(series), "metrics": metrics,
         "deletions": [d for d in objects("deletion") if not d.get("restored_at")],
-        "files": objects("file"), "runtime": RUNTIME, "release": latest_release, "max_runs": MAX_RUNS,
+        "files": objects("file"), "runtime": RUNTIME, "release": latest_release, "max_runs": MAX_RUNS, "ingest_defaults": ingest_defaults().model_dump(),
         "demo_enabled": os.getenv("DEMO_ENABLED") == "true", "time": now()}
 
 
@@ -732,7 +928,7 @@ async def caps():
 @app.get("/api/about")
 async def about():
     return {"runtime": RUNTIME, "release": latest_release,
-        "dependencies": {name: importlib.metadata.version(name) for name in ["fastapi", "uvicorn", "redis", "httpx", "cryptography", "prometheus-client"]},
+        "dependencies": {name: importlib.metadata.version(name) for name in ["fastapi", "uvicorn", "redis", "httpx", "cryptography", "prometheus-client", "pymongo"]},
         "python": os.sys.version.split()[0], "java": "Eclipse Temurin JRE 21", "frontend": "React 19 · Vite 6 · Phosphor Icons · Recharts",
         "storage": "SQLite WAL / encrypted profiles / persistent Docker volume", "build": "1.0.0",
         "limitations": ["Pub/Sub 알림은 유실될 수 있으며 감사 로그가 아닙니다", "키 수 일치는 데이터 일치를 보장하지 않습니다", "Cluster 관측은 primary 노드에 직접 접근할 수 있어야 합니다", "Memcached 실행은 연결 어댑터 미지원", "SQL·SpEL은 신뢰할 수 있는 운영자만 사용하세요"]}
@@ -973,6 +1169,8 @@ async def queue_run(ident: str, automatic: bool = False):
         if automatic and not j.get("watch_file", True):
             raise HTTPException(409, "자동 가져오기가 비활성화되었습니다")
         j = j | {"file_source": source}
+    if is_managed(j):
+        j=j|{'_ingest_settings':ingest_settings(j)}
     run = {"id": uid(), "job_id": ident, "snapshot": j, "status": "QUEUED", "created_at": now(), "validation": "NOT_RUN", "trigger": "file-change" if automatic else "manual"}
     if j["kind"] == "file-import":
         watch = get_watch(j)
