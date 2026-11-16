@@ -549,3 +549,25 @@ select{color-scheme:inherit}.primary,.primary svg{color:var(--primary-text)}.tog
 .profile-entry{display:flex;align-items:center;gap:2px}.profile-entry>button:first-child{flex:1;min-width:0}.profile-list .profile-entry .entry-menu-trigger{width:30px;flex-shrink:0;padding:8px 4px;justify-content:center}
 
 .ingest-fields{border-top:1px solid var(--line);padding:16px 0;margin-top:12px}.ingest-fields h3{font-size:13px;margin:0 0 12px}.audit-dashboard{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:18px;margin:18px 0}.audit-counters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.audit-counters div{display:flex;flex-direction:column;gap:8px;padding:10px;background:var(--surface-alt,var(--bg));border-radius:5px}.audit-counters span{font-size:11px;color:var(--muted)}.audit-counters b{font-size:23px}.audit-table{overflow:auto}.audit-table table{width:100%;border-collapse:collapse;font-size:11px}.audit-table th,.audit-table td{text-align:left;padding:10px 5px;border-bottom:1px solid var(--line)}.audit-table code{overflow-wrap:anywhere}.audit-event{margin:16px 0;padding:12px;border:1px solid var(--line);border-radius:5px;overflow-wrap:anywhere}.audit-event time,.audit-event>code{display:block;font-size:11px;margin-top:10px}.audit-event dt{color:var(--muted);font-size:10px;margin-top:10px}.audit-event dd{margin:4px 0;font-size:11px}
+
+/* Dialog size follows the browser viewport, with a fixed header and scrollable body. */
+.modal{width:50vw;height:50vh;height:50dvh;max-width:calc(100vw - 24px);max-height:50dvh;min-width:0;min-height:0;flex:none;display:flex;flex-direction:column;overflow:hidden;padding:20px;container-type:inline-size;container-name:dialog}
+.modal>header{flex:none;gap:12px;margin-bottom:16px;min-width:0}
+.modal h2{min-width:0;overflow-wrap:anywhere;font-size:18px}
+.modal-body{flex:1;min-width:0;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding-right:4px;overflow-wrap:anywhere}
+.modal-body :is(form,label,section,.form-grid,.profiles-layout,.profile-list){min-width:0;max-width:100%}
+.modal-body :is(input,select,textarea){min-width:0;max-width:100%}
+.modal-body button{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.modal-body .modal-actions{flex-wrap:wrap}
+.modal-body .trash-list{max-height:none}
+@container dialog (max-width:640px){.form-grid,.profiles-layout{grid-template-columns:minmax(0,1fr)}.profile-list{border-right:0;border-bottom:1px solid var(--border);padding:0 0 12px}.trash-list section{flex-wrap:wrap}}
+/* Keep drawer navigation and a usable scroll area inside short viewports. */
+.app{--drawer-bottom:16px;--drawer-fit-top:min(var(--drawer-top,196px),max(12px,calc(100dvh - var(--drawer-bottom) - 260px)))}
+.drawer-rail{top:var(--drawer-fit-top);max-height:calc(100dvh - var(--drawer-fit-top) - var(--drawer-bottom))}
+.inspector.drawer-panel{top:var(--drawer-fit-top);bottom:var(--drawer-bottom)}
+.shell,.topbar,.brand,.top-actions,.pinned,.job-heading>div{min-width:0}
+.job-heading h1,.flow-node b,.key-count small{overflow-wrap:anywhere}
+.flow-node b{word-break:normal}
+@media(max-width:1280px){.columns.drawer-open{padding-right:var(--drawer-rail-space)}}
+@media(max-width:800px){.topbar{height:auto;min-height:56px;flex-wrap:wrap;gap:8px;padding-top:10px;padding-bottom:10px}.top-actions{flex-wrap:wrap;justify-content:flex-end;margin-left:auto}.form-grid{grid-template-columns:minmax(0,1fr)}.pinned{flex-wrap:wrap}.collection{display:none}.job-heading{flex-wrap:wrap}.job-heading h1{font-size:22px}.context-tabs{gap:12px;flex-wrap:wrap}.metric-strip{flex-wrap:wrap}}
+@media(max-width:620px){.app{--drawer-bottom:58px}.modal{padding:12px}.modal>header{gap:4px;margin-bottom:10px}.modal h2{font-size:14px}.modal-body{padding-right:0}.modal-body .form-grid{gap:0}.modal-body .primary,.modal-body .outline{padding:8px}.flow{flex-wrap:wrap}.flow-node{flex-basis:100%}.flow>.arrow{transform:rotate(90deg);margin:0 calc(50% - 7px)}.step{flex:1}.audit-counters{grid-template-columns:repeat(2,minmax(0,1fr))}}
